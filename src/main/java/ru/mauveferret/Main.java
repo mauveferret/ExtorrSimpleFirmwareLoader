@@ -1,6 +1,7 @@
 package ru.mauveferret;
 
 import jssc.SerialPort;
+import jssc.SerialPortException;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -26,8 +27,10 @@ public class Main
             InputStream RGAfirmwareStream = new FileInputStream(bootFile);
             new FileLoader(args[0], RGAfirmwareStream, SerialPort.BAUDRATE_9600);
         }
+
         catch (FileNotFoundException e){
             System.out.println(" File not Found: "+firmwarePath);
+            System.out.println("please enter as arguments COM port and relative address to the firmware");
         }
         catch (URISyntaxException e){System.out.println(e.getMessage());}
 

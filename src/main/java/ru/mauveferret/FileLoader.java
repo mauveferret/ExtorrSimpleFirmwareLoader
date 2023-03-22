@@ -1,149 +1,67 @@
 package ru.mauveferret;
 
-import java.util.stream.Stream;
 import jssc.SerialPort;
 import jssc.SerialPortException;
 
-public class FileLoader
-{
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.stream.Stream;
 
-    public FileLoader(String commPort, Stream fstream, String baudRate)
-    {
+public class FileLoader {
 
-    }
-
-
-    int increaseBaudRate;
     SerialPort serial;
+    InputStream RGAfirmwareStream;
+    int increaseBaudRate;
 
-    public boolean bootFail = false;
+    public FileLoader(String commPort, InputStream RGAfirmwareStream, int baudRate) {
+        this.RGAfirmwareStream = RGAfirmwareStream;
+        serial = new SerialPort(commPort);
+        try {
+            serial.setParams(baudRate, 8, 1, 0);
+            serial.openPort();
+            load();
 
-    //public Event StringEventHandler EmitMessage;
-   // public Event EventHandler EmitFinished;
+            serial.closePort();
 
-    boolean cancelRequested;
-
-    /*public void RequestCancel()
-    {
-        try{
-            serial.ReadTimeout = 1;
-            doSleep(100);
-            serial.Close();
+        } catch (SerialPortException e) {
+            System.out.println("Serial Port Error");
+            e.printStackTrace();
+            System.out.println("Boot Failed!");
         }
-        catch{}
-        cancelRequested = true;
-    }
-    */
+        catch (IOException e){
+            e.printStackTrace();
+            System.out.println("Boot Failed!");
 
-
-    boolean waitForByte(byte want) throws SerialPortException {
-        //outputString(String.Format("Waiting for byte: 0x{0:x}", want));
-
-        for (int i = 0; i < 100; i++){
-            byte b = serial.readBytes(1)[0];
-            if (b == want){
-                return true;
-            } else {
-                //outputString(String.Format("discarding: {0:x}", b));
-                System.out.println("discarding: {0:x}"+b);
-            }
         }
-        System.out.println("giving up");
-        return false;
-    }
-
-
-    boolean[] acksReceived = new boolean[100];
-
-
-
-    String lastResponse = "";
-
-    void waitReadIncomingBytes() throws SerialPortException {
-        while(serial.getInputBufferBytesCount() == 0){
-            doSleep(1); // wait for bytes to come
-        }
-        doSleep(100);
-        readIncomingBytes();
-    }
-
-    void readIncomingBytes() throws SerialPortException {
-        int num;
-
-       /* if (cancelRequested){
-            // tbd: make a custom exception for this
-            throw new Exception ("Cancel Requested");
-        }
-        */
-
-        while ( (num = serial.getInputBufferBytesCount()) != 0){
-            for (int i = 0; i < num; i++){
-                byte b = (byte) serial.ReadByte();
-                if (b == '{'){
-                    lastResponse = "{";
-                } else if (b == '}'){
-                    lastResponse += "}";
-                    processResponse(lastResponse);
-                } else {
-                    lastResponse += (char) b;
-                }
-            }
+        catch (InterruptedException e){
+            e.printStackTrace();
+            System.out.println("Boot Failed!");
         }
     }
 
-    byte[] buf = new byte[1];
 
-    void sendByte(byte ch)
-    {
-        buf[0] = (byte) ch;
-        serial.Write(buf, 0, 1);
-    }
 
-    void resetQpBox()
-    {
+    void load() throws SerialPortException, IOException, InterruptedException {
+
+        // get boot record from qpbox.l2
+        byte[] initChunk = RGAfirmwareStream.readNBytes(2560);
+
         // enough for 1 second at 9600 baud.
-        for (int i = 0; i < 1000; i++)
-            sendByte(0);
-
-    }
-
-    const int loaderSize = 2560;
-
-    public FirmwareDownloader(String commPort, Stream str, int baudRate)
-    {
-        fstream = str;
-        serial = new SerialPort(commPort, 9600);
-        serial.ReadTimeout = 10000;
-        this.increaseBaudRate = baudRate;
-        serial.Open();
-    }
+        for (int i = 0; i < 1000; i++) {serial.writeByte((byte) 0);}
 
 
-    void doSleep(int millisecs)
-    {
-        Thread.Sleep(millisecs);qpbox.l2
-
-    }
-
-    void doDownload()
-    {
-        byte[] initChunks = new byte[loaderSize]; // loaderSize = 2560
-
-        fstream.Read(initChunks, 0, loaderSize); // get boot record from qpbox.l2
-
-        resetQpBox();
-
-        if (waitForByte(0xAC) == false){
-            serial.Close();
-            return;
+        //checking the exact moment when CR+LF received. You then will have 2 sec to load firmware.
+        if (!waitForByte((byte) 0xAC)) {
+                serial.closePort();
+            System.out.println("Error.Have no received 0xAC. Stopping...");
         }
 
-        outputString(String.Format("Downloading level-2 boot loader chunks..."));
-        serial.Write(initChunks, 0, loaderSize); // send boot record
+        // send boot record
+        serial.writeBytes(initChunk);
 
         waitReadIncomingBytes(); // wait for "{Init=1}"
 
-        if(increaseBaudRate != 9600){ // optionally increase baud based off of speed box
+        /*if (increaseBaudRate != 9600) { // optionally increase baud based off of speed box
             string baudPacket = String.Format("{0}{1}{2}{3}",
                     "{", "PacNum=1,Baud=", increaseBaudRate, "}");
             // baudPacket = {PacNum=1,Baud=115200}
@@ -157,126 +75,80 @@ public class FileLoader
             doSleep(100); // wait 100 ms, allow some time
             // for the baud changes to take place
         }
+         */
 
         byte[] packet = new byte[1296];
-        while ( (fstream.Read(packet, 0, packet.Length)) != 0){
-            readIncomingBytes();
-            serial.Write(packet, 0, packet.Length);
+
+        while (RGAfirmwareStream.available()>0){
+            packet = RGAfirmwareStream.readNBytes(1296);
+            serial.writeBytes(packet);
+            printIncomingBytes();
         }
 
-        if(serial.BytesToRead != 0){
-            readIncomingBytes(); // read the rest of the packet acks, then good to go
-        }
+        // read the rest of the packet acks, then good to go
+        if (serial.getInputBufferBytesCount()>0) printIncomingBytes();
+        Thread.currentThread().wait(100);
 
-        doSleep(100);
+        serial.writeBytes("{Go}".getBytes());
 
-        serial.Write("{Go}"); // tell the firmware to start
-
-        try{
-            string ack = serial.ReadLine(); // wait for "ok:all channels cleared\r\n"
-            outputString(ack);
-
-            outputString("Finished");
-        }
-        catch (TimeoutException) {
-            outputString("Boot failed");
-            bootFail = true;
-            doSleep(2000);
-        }
-
-        serial.Close();
+        System.out.println(serial.readString());
+        System.out.println("Finished. Good bye)");
 
     }
 
-    public void Download()
-    {
+
+    boolean waitForByte(byte expected) {
+        //outputString(String.Format("Waiting for byte: 0x{0:x}", want));
+
         try {
-            doDownload();
-        } catch {
-//          Console.WriteLine("exception in Download, thread exiting");
-        serial.Close();
+            for (int i = 0; i < 100; i++) {
+                byte b = serial.readBytes(1)[0];
+                if (b == expected) {
+                    return true;
+                } else {
+                    //outputString(String.Format("discarding: {0:x}", b));
+                    System.out.println("discarding: {0:x}" + b);
+                }
+            }
+            System.out.println("giving up");
+            return false;
+        } catch (SerialPortException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
-        if (EmitFinished != null)
-            EmitFinished(this, new EventArgs());
 
+
+
+
+    void waitReadIncomingBytes() throws SerialPortException, InterruptedException {
+        while (serial.getInputBufferBytesCount() == 0) {
+            Thread.currentThread().wait(1);// wait for bytes to come
+        }
+        Thread.currentThread().wait(100);
+        printIncomingBytes();
+    }
+
+    void printIncomingBytes() throws SerialPortException {
+
+        String lastResponse = "";
+        int bytesAtPort = serial.getInputBufferBytesCount();
+
+        while (bytesAtPort!= 0) {
+            for (int i = 0; i < bytesAtPort; i++) {
+                byte b = serial.readBytes(1)[0];
+                if (b == '{') {
+                    lastResponse = "{";
+                } else if (b == '}') {
+                    lastResponse += "}";
+                    System.out.println(lastResponse);
+                } else {
+                    lastResponse += (char) b;
+                }
+            }
+        }
     }
 
 }
 
-
-
-class FirmwareDialog : Form
-        {
-        Button cancel;
-        Label message;
-        FirmwareDownloader downloader;
-        Stream fstream;
-        Button openCloseBtn;
-        bool canceled = false;
-
-public void ShowMessage(object sender, StringEventArgs e)
-        {
-        message.Text = e.StringValue;
-        }
-
-public void onDownloadFinished(object sender, EventArgs e)
-        {
-        if(!canceled & !downloader.bootFail){
-        openCloseBtn.PerformClick();
-        }
-        this.Close();
-        }
-
-        void onCancel(object sender, EventArgs e)
-        {
-        canceled = true;
-        downloader.RequestCancel();
-        }
-
-
-        void layoutForm()
-        {
-        Text = "Firmware Download";
-        Height = 150;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        ControlBox = false;
-
-        cancel = new Button();
-        cancel.Text = "Cancel";
-        CancelButton = cancel;
-        cancel.DialogResult = DialogResult.Cancel;
-        Controls.Add(cancel);
-
-        cancel.Click += new EventHandler(onCancel);
-
-        int hmargin = 30;
-        int vmargin = 10;
-
-        cancel.Location = new Point(hmargin, ClientSize.Height - cancel.Height - vmargin);
-        cancel.Left = ClientSize.Width - cancel.Width - hmargin;
-
-        message = new Label();
-        message.AutoSize = true;
-        message.Text = "";
-        message.Location = new Point(hmargin, cancel.Top / 2);
-        Controls.Add(message);
-        }
-
-
-public FirmwareDialog(Button b, string commPort, int increaseBaud)
-        {
-        openCloseBtn = b;
-        layoutForm();
-
-        fstream = System.Reflection.Assembly.GetExecutingAssembly().
-        GetManifestResourceStream("qpbox.l2");
-
-        downloader = new FirmwareDownloader(commPort, fstream, increaseBaud);
-        Thread t = new Thread(new ThreadStart(downloader.Download));
-        downloader.EmitMessage += new StringEventHandler(this.ShowMessage);
-        downloader.EmitFinished += new EventHandler(this.onDownloadFinished);
-        t.Start();
-        }
-
-        }
 

@@ -2,9 +2,12 @@ package ru.mauveferret;
 
 import jssc.SerialPort;
 import jssc.SerialPortException;
+import jssc.SerialPortList;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serial;
+import java.util.Arrays;
 import java.util.stream.Stream;
 
 public class FileLoader {
@@ -15,10 +18,14 @@ public class FileLoader {
 
     public FileLoader(String commPort, InputStream RGAfirmwareStream, int baudRate) {
         this.RGAfirmwareStream = RGAfirmwareStream;
-        serial = new SerialPort(commPort);
+        serial = new SerialPort("COM3");
         try {
-            serial.setParams(baudRate, 8, 1, 0);
+            System.out.println(Arrays.toString(SerialPortList.getPortNames()));
             serial.openPort();
+            System.out.println("isAlive");
+            serial.setParams(baudRate, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE);
+            System.out.println("isAlive");
+
             load();
 
             serial.closePort();

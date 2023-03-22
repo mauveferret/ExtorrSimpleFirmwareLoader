@@ -1,5 +1,7 @@
 package ru.mauveferret;
 
+import jssc.SerialPort;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -18,14 +20,14 @@ public class Main
 
         try {
             String currentJar = Main.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
-            firmwarePath = new File(currentJar).getParent()+File.separator+args[0];
+            firmwarePath = new File(currentJar).getParent()+File.separator+args[1];
 
             File bootFile = new File(firmwarePath);
             InputStream RGAfirmwareStream = new FileInputStream(bootFile);
-            new FileLoader(args[0], RGAfirmwareStream,9600);
+            new FileLoader(args[0], RGAfirmwareStream, SerialPort.BAUDRATE_9600);
         }
         catch (FileNotFoundException e){
-            System.out.println(" File not Found: "+firmwarePath+File.separator+args[0]);
+            System.out.println(" File not Found: "+firmwarePath);
         }
         catch (URISyntaxException e){System.out.println(e.getMessage());}
 

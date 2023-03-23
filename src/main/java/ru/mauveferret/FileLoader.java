@@ -11,11 +11,10 @@ public class FileLoader {
     SerialPort serial;
     InputStream RGAfirmwareStream;
 
-    public FileLoader(String commPort, InputStream RGAfirmwareStream, int baudRate) {
+    public FileLoader(String commPort, InputStream RGAfirmwareStream, int baudRate) throws SerialPortException {
         this.RGAfirmwareStream = RGAfirmwareStream;
         serial = new SerialPort(commPort);
         try {
-            //System.out.println(Arrays.toString(SerialPortList.getPortNames()));
             serial.openPort();
             serial.setParams(baudRate, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE);
 
@@ -23,9 +22,6 @@ public class FileLoader {
 
             serial.closePort();
 
-        } catch (SerialPortException e) {
-            System.out.println("Serial Port Error: "+e.getExceptionType());
-            System.out.println("Boot Failed!");
         }
         catch (IOException e){
             e.printStackTrace();

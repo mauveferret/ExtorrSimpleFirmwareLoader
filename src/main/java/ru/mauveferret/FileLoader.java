@@ -1,85 +1,69 @@
 package ru.mauveferret;
-
 import jssc.SerialPort;
 import jssc.SerialPortException;
 import java.io.IOException;
 import java.io.InputStream;
 
 
+
 public class FileLoader {
 
     SerialPort serial;
+    int baudRate;
     InputStream RGAfirmwareStream;
 
     public FileLoader(String commPort, InputStream RGAfirmwareStream, int baudRate) throws SerialPortException {
         this.RGAfirmwareStream = RGAfirmwareStream;
+        this.baudRate = baudRate;
         serial = new SerialPort(commPort);
         try {
             serial.openPort();
-            serial.setParams(baudRate, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE);
-
+            serial.setParams(SerialPort.BAUDRATE_9600, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE);
             load();
-
             serial.closePort();
 
         }
-        catch (IOException e){
+        catch (IOException | InterruptedException e){
             e.printStackTrace();
             System.out.println("Boot Failed!");
-
-        }
-        catch (InterruptedException e){
-            e.printStackTrace();
-            System.out.println("Boot Failed!");
+            serial.closePort();
         }
     }
-
-
 
     void load() throws SerialPortException, IOException, InterruptedException {
 
         System.out.println("Port "+serial.getPortName()+" is opened. Start loading...");
+        System.out.println("----------------------------------------------------------");
         // get boot record from qpbox.l2
         byte[] initChunk = RGAfirmwareStream.readNBytes(2560);
-        // enough for 1 second at 9600 baud.
+
+        // enough for 1 second at 9600 baud to prepare RGA.
         for (int i = 0; i < 1000; i++) {serial.writeByte((byte) 0);}
 
         //checking the exact moment when CR+LF received. You then will have 2 sec to load firmware.
         if (!waitForByte("AC")) {
                 serial.closePort();
-            System.out.println("Error.Have no received 0xAC. Stopping...");
+                System.out.println("Error.Have no received 0xAC. Stopping...");
+                System.exit(0);
         }
 
         // send boot record
         serial.writeBytes(initChunk);
+        // wait for "{Init=1}" from RGA
+        waitReadIncomingBytes();
 
-        waitReadIncomingBytes(); // wait for "{Init=1}"
+        //ask for change baudrate to "baudRate" like 115200
+        serial.writeString("{PacNum=1,Baud="+baudRate+"}");
+        printIncomingBytes();
+        serial.setParams(SerialPort.BAUDRATE_115200, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE);
 
-        /*if (increaseBaudRate != 9600) { // optionally increase baud based off of speed box
-            string baudPacket = String.Format("{0}{1}{2}{3}",
-                    "{", "PacNum=1,Baud=", increaseBaudRate, "}");
-            // baudPacket = {PacNum=1,Baud=115200}
-
-            byte[] increaseBaud = System.Text.Encoding.ASCII.GetBytes(baudPacket);
-            serial.Write(increaseBaud, 0, increaseBaud.Length);
-
-            waitReadIncomingBytes(); // wait for "{PacNum=1}"
-            serial.BaudRate = increaseBaudRate; // increase baud rate to communicate
-
-            doSleep(100); // wait 100 ms, allow some time
-            // for the baud changes to take place
-        }
-         */
-
-        byte[] packet = new byte[1296];
-
+        byte[] packet;
         while (RGAfirmwareStream.available()>0){
-            //System.out.println("TEST1:     "+RGAfirmwareStream.available());
             packet = RGAfirmwareStream.readNBytes(1296);
             serial.writeBytes(packet);
             printIncomingBytes();
-            //waitReadIncomingBytes();
         }
+
         Thread.sleep(200);
         // read the rest of the packet acks, then good to go
         if (serial.getInputBufferBytesCount()>0) waitReadIncomingBytes();
@@ -102,7 +86,7 @@ public class FileLoader {
         }
         System.out.println(params);
         System.out.println("-------------PARAMETERS ENDED-------------------");
-        System.out.println("Good bye and hav a nice day :)");
+        System.out.println("Good bye and have a nice day :)");
     }
 
 
@@ -112,7 +96,7 @@ public class FileLoader {
         try {
             for (int i = 0; i < 100; i++) {
                 byte[] b = serial.readBytes(1);
-                //System.out.println(i+" :"+bytesToHex(b));
+                //System.out.println(i+" :"+bytesToHex(b)+" "+b);
                 if (expected.contains(bytesToHex(b))) {
                     System.out.println("RGA is responding. Got 0xAC.");
                     return true;
@@ -140,7 +124,6 @@ public class FileLoader {
         return new String(hexChars);
     }
 
-
     void waitReadIncomingBytes() throws SerialPortException, InterruptedException {
         while (serial.getInputBufferBytesCount() == 0) {
             // wait for bytes to come
@@ -150,15 +133,21 @@ public class FileLoader {
         printIncomingBytes();
     }
 
-    void printIncomingBytes() throws SerialPortException {
+    void printIncomingBytes() throws SerialPortException, InterruptedException {
 
         String lastResponse = "";
         int bytesAtPort = serial.getInputBufferBytesCount();
 
+        Thread.sleep(200);
         while (bytesAtPort!= 0) {
             for (int i = 0; i < bytesAtPort; i++) {
-                byte b = serial.readBytes(1)[0];
-                //System.out.println(i+" "+bytesAtPort+" "+b);
+                byte b = '1';
+                try {
+                     b = serial.readBytes(1)[0];
+                }
+                catch (Exception exe){
+                    System.out.println(exe.getMessage());
+                }
 
                 if (b == '{') {
                     lastResponse = "{";
@@ -166,15 +155,21 @@ public class FileLoader {
                     lastResponse += "}";
                     if (lastResponse.contains("PacNum"))
                     {
-                        int value = Integer.parseInt(lastResponse.replaceAll("[^0-9]", ""));
-
-                        System.out.print(value*2+"% ");
+                        try {
+                            int value = Integer.parseInt(lastResponse.replaceAll("[^0-9]", ""));
+                            System.out.print(value*2+"% ");
+                        }
+                        catch (Exception e){
+                            System.out.println(e.getMessage());
+                            System.out.println("Parsing problem "+lastResponse);
+                        }
                     }
                     else System.out.println("Response: "+lastResponse);
                 } else {
                     lastResponse += (char) b;
                 }
                 bytesAtPort = serial.getInputBufferBytesCount();
+                Thread.sleep(10);
             }
         }
     }
